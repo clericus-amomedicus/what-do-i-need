@@ -50,6 +50,41 @@ jobs:
       - name: Build
         run: dotnet build "$PLUGIN_PROJECT" -c Release -p:Version="$VERSION"
 
+      - name: Read changelog from tag message
+        run: |
+          git fetch -q --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+            git cat-file tag "$GITHUB_REF_NAME" | sed '1,/^$/d; /^-----BEGIN /,$d' > "$RUNNER_TEMP/changelog.md"
+          else
+            : > "$RUNNER_TEMP/changelog.md"
+          fi
+          cat "$RUNNER_TEMP/changelog.md"
+
+      - name: Complete plugin manifest
+        run: |
+          out="WhatDoINeed/bin/Release/$PLUGIN_NAME"
+          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          download="$repo_url/releases/download/$GITHUB_REF_NAME/latest.zip"
+          raw="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME"
+
+          # Same layout the official repo uses: images/icon.png and images/image1-5.png
+          # (images max 730x380; Dalamud rejects anything larger).
+          icon=$(ls images/icon.png 2>/dev/null)
+          images=$(ls images/image*.png 2>/dev/null | sort -V | head -n 5 \
+            | jq -R --arg raw "$raw" '"\($raw)/\(.)"' | jq -s .)
+
+          jq --arg repo "$repo_url" --arg dl "$download" --argjson ts "$(date +%s)" \
+            --arg icon "${icon:+$raw/$icon}" --argjson images "$images" \
+            --rawfile changelog "$RUNNER_TEMP/changelog.md" \
+            '. + {RepoUrl: $repo, DownloadLinkInstall: $dl, DownloadLinkUpdate: $dl, DownloadLinkTesting: $dl, LastUpdate: $ts}
+              + (if $icon != "" then {IconUrl: $icon} else {} end)
+              + (if ($images | length) > 0 then {ImageUrls: $images} else {} end)
+              + (($changelog | rtrimstr("\n")) as $c | if $c != "" then {Changelog: $c} else {} end)' \
+            "$out/$PLUGIN_NAME.json" > "$RUNNER_TEMP/entry.json"
+
+          cp "$RUNNER_TEMP/entry.json" "$out/$PLUGIN_NAME.json"
+          (cd "$out" && zip -q latest.zip "$PLUGIN_NAME.json")
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,6 +92,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "WhatDoINeed/bin/Release/$PLUGIN_NAME/latest.zip" \
             --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/changelog.md" \
             --generate-notes
 
       - name: Check out pluginmaster repo
@@ -70,23 +106,6 @@ jobs:
       - name: Update pluginmaster repo.json
         if: vars.PLUGIN_REPO != ''
         run: |
-          manifest="$GITHUB_WORKSPACE/WhatDoINeed/bin/Release/$PLUGIN_NAME/$PLUGIN_NAME.json"
-          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-          download="$repo_url/releases/download/$GITHUB_REF_NAME/latest.zip"
-          raw="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME"
-
-          # images/icon.* becomes the icon; images/screenshot*.{png,jpg} (up to 5) become the screenshots.
-          icon=$(ls images/icon.* 2>/dev/null | head -n 1)
-          screenshots=$(ls images/screenshot*.png images/screenshot*.jpg 2>/dev/null | sort -V | head -n 5 \
-            | jq -R --arg raw "$raw" '"\($raw)/\(.)"' | jq -s .)
-
-          jq --arg repo "$repo_url" --arg dl "$download" --argjson ts "$(date +%s)" \
-            --arg icon "${icon:+$raw/$icon}" --argjson images "$screenshots" \
-            '. + {RepoUrl: $repo, DownloadLinkInstall: $dl, DownloadLinkUpdate: $dl, DownloadLinkTesting: $dl, LastUpdate: $ts}
-              + (if $icon != "" then {IconUrl: $icon} else {} end)
-              + (if ($images | length) > 0 then {ImageUrls: $images} else {} end)' \
-            "$manifest" > "$RUNNER_TEMP/entry.json"
-
           cd pluginmaster
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
