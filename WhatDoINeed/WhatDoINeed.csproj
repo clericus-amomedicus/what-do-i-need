@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.0.0.1</Version>
+    <Version>0.0.0.2</Version>
     <Author>Clericus Amomedicus</Author>
     <Name>What Do I Need?</Name>
     <Punchline>Turns marked recipes into a list of base materials to gather.</Punchline>
