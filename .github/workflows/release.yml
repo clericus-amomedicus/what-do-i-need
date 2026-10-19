@@ -73,9 +73,18 @@ jobs:
           manifest="$GITHUB_WORKSPACE/WhatDoINeed/bin/Release/$PLUGIN_NAME/$PLUGIN_NAME.json"
           repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           download="$repo_url/releases/download/$GITHUB_REF_NAME/latest.zip"
+          raw="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME"
+
+          # images/icon.* becomes the icon; images/screenshot*.{png,jpg} (up to 5) become the screenshots.
+          icon=$(ls images/icon.* 2>/dev/null | head -n 1)
+          screenshots=$(ls images/screenshot*.png images/screenshot*.jpg 2>/dev/null | sort -V | head -n 5 \
+            | jq -R --arg raw "$raw" '"\($raw)/\(.)"' | jq -s .)
 
           jq --arg repo "$repo_url" --arg dl "$download" --argjson ts "$(date +%s)" \
-            '. + {RepoUrl: $repo, DownloadLinkInstall: $dl, DownloadLinkUpdate: $dl, DownloadLinkTesting: $dl, LastUpdate: $ts}' \
+            --arg icon "${icon:+$raw/$icon}" --argjson images "$screenshots" \
+            '. + {RepoUrl: $repo, DownloadLinkInstall: $dl, DownloadLinkUpdate: $dl, DownloadLinkTesting: $dl, LastUpdate: $ts}
+              + (if $icon != "" then {IconUrl: $icon} else {} end)
+              + (if ($images | length) > 0 then {ImageUrls: $images} else {} end)' \
             "$manifest" > "$RUNNER_TEMP/entry.json"
 
           cd pluginmaster
