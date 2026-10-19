@@ -1,0 +1,101 @@
+# Builds the plugin when a version tag (e.g. v0.0.1.0) is pushed, publishes a
+# GitHub release with latest.zip, and upserts this plugin's entry in the shared
+# pluginmaster repo.json.
+#
+# One-time setup in this repo's Settings -> Secrets and variables -> Actions:
+#   Variable PLUGIN_REPO        owner/name of the pluginmaster repo, e.g. clericus-amomedicus/DalamudPlugins
+#   Secret   PLUGIN_REPO_TOKEN  fine-grained PAT with Contents: read and write on that repo only
+# If PLUGIN_REPO is unset, the release is still created and the pluginmaster step is skipped.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+env:
+  PLUGIN_NAME: WhatDoINeed
+  PLUGIN_PROJECT: WhatDoINeed/WhatDoINeed.csproj
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Download Dalamud reference assemblies
+        run: |
+          mkdir -p "$HOME/.xlcore/dalamud/Hooks/dev"
+          curl -fsSL -o dalamud.zip https://goatcorp.github.io/dalamud-distrib/latest.zip
+          unzip -q dalamud.zip -d "$HOME/.xlcore/dalamud/Hooks/dev"
+          rm dalamud.zip
+
+      - name: Test
+        run: dotnet test WhatDoINeed.Tests/WhatDoINeed.Tests.csproj -c Release
+
+      - name: Build
+        run: dotnet build "$PLUGIN_PROJECT" -c Release -p:Version="$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "WhatDoINeed/bin/Release/$PLUGIN_NAME/latest.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: Check out pluginmaster repo
+        if: vars.PLUGIN_REPO != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PLUGIN_REPO }}
+          token: ${{ secrets.PLUGIN_REPO_TOKEN }}
+          path: pluginmaster
+
+      - name: Update pluginmaster repo.json
+        if: vars.PLUGIN_REPO != ''
+        run: |
+          manifest="$GITHUB_WORKSPACE/WhatDoINeed/bin/Release/$PLUGIN_NAME/$PLUGIN_NAME.json"
+          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          download="$repo_url/releases/download/$GITHUB_REF_NAME/latest.zip"
+
+          jq --arg repo "$repo_url" --arg dl "$download" --argjson ts "$(date +%s)" \
+            '. + {RepoUrl: $repo, DownloadLinkInstall: $dl, DownloadLinkUpdate: $dl, DownloadLinkTesting: $dl, LastUpdate: $ts}' \
+            "$manifest" > "$RUNNER_TEMP/entry.json"
+
+          cd pluginmaster
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Other plugins may push to the same file concurrently, so re-apply
+          # the upsert on top of the latest remote state if the push is rejected.
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin
+            git reset -q --hard "origin/$(git rev-parse --abbrev-ref HEAD)"
+            [ -f repo.json ] || echo '[]' > repo.json
+            jq --slurpfile e "$RUNNER_TEMP/entry.json" \
+              '[.[] | select(.InternalName != $e[0].InternalName)] + $e | sort_by(.InternalName)' \
+              repo.json > repo.json.tmp
+            mv repo.json.tmp repo.json
+            git add repo.json
+            git commit -q -m "Update $PLUGIN_NAME to $VERSION"
+            if git push -q; then exit 0; fi
+            sleep $((attempt * 5))
+          done
+          echo "Failed to push repo.json after 5 attempts" >&2
+          exit 1
