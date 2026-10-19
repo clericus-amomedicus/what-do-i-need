@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.0.0.1</Version>
+    <Author>Clericus Amomedicus</Author>
+    <Name>What Do I Need?</Name>
+    <Punchline>Turns marked recipes into a list of base materials to gather.</Punchline>
+    <Description>Mark recipes from the Crafting Log, any item's right-click menu, or a search window. What Do I Need? walks each recipe's full ingredient tree, including intermediate crafts, and lists every base material you need, grouped by where it comes from.</Description>
+    <Tags>crafting;gathering;recipe;materials;utility</Tags>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WhatDoINeed.Core\WhatDoINeed.Core.csproj" />
+  </ItemGroup>
+</Project>

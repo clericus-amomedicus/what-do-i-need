@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="WhatDoINeed/WhatDoINeed.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="WhatDoINeed.Core/WhatDoINeed.Core.csproj" />
+  <Project Path="WhatDoINeed.Tests/WhatDoINeed.Tests.csproj" />
+</Solution>
