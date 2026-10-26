@@ -27,6 +27,7 @@ public sealed class Plugin : IDalamudPlugin
         IDataManager dataManager,
         IContextMenu contextMenu,
         IGameGui gameGui,
+        IChatGui chatGui,
         IPluginLog log)
     {
         this.pluginInterface = pluginInterface;
@@ -36,7 +37,7 @@ public sealed class Plugin : IDalamudPlugin
 
         craftingData = new CraftingDataService(new LuminaCraftingDataReader(dataManager.Excel), log);
 
-        mainWindow = new MainWindow(craftingData, gameGui, configuration, () => pluginInterface.SavePluginConfig(configuration));
+        mainWindow = new MainWindow(craftingData, gameGui, chatGui, configuration, () => pluginInterface.SavePluginConfig(configuration));
         windowSystem.AddWindow(mainWindow);
 
         this.contextMenu = new RecipeContextMenu(contextMenu, craftingData, log);

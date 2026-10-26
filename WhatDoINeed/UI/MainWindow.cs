@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using System.Text;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
@@ -19,6 +20,7 @@ public sealed class MainWindow : Window
 {
     private readonly CraftingDataService data;
     private readonly IGameGui gameGui;
+    private readonly IChatGui chatGui;
     private readonly Configuration configuration;
     private readonly Action save;
 
@@ -29,7 +31,7 @@ public sealed class MainWindow : Window
     private MaterialPlan? plan;
     private LocationPlan? locations;
 
-    public MainWindow(CraftingDataService data, IGameGui gameGui, Configuration configuration, Action save) : base("What Do I Need?###WhatDoINeedMain")
+    public MainWindow(CraftingDataService data, IGameGui gameGui, IChatGui chatGui, Configuration configuration, Action save) : base("What Do I Need?###WhatDoINeedMain")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -39,6 +41,7 @@ public sealed class MainWindow : Window
 
         this.data = data;
         this.gameGui = gameGui;
+        this.chatGui = chatGui;
         this.configuration = configuration;
         this.save = save;
     }
@@ -211,10 +214,12 @@ public sealed class MainWindow : Window
         }
     }
 
-    private static void DrawGather(MaterialPlan plan)
+    private void DrawGather(MaterialPlan plan)
     {
         if (ImGui.SmallButton("Copy list"))
             ImGui.SetClipboardText(GatherText(plan));
+        ImGui.SameLine();
+        ImGui.TextDisabled("Click an item to link it in chat.");
 
         foreach (var group in plan.Materials.GroupBy(m => m.Item.Source))
         {
@@ -222,7 +227,10 @@ public sealed class MainWindow : Window
             ImGui.TextDisabled(SourceLabel(group.Key));
             using var indent = ImRaii.PushIndent();
             foreach (var need in group)
+            {
                 ImGui.TextUnformatted($"{need.Amount}x {need.Item.Name}");
+                LinkOnClick(need.Item);
+            }
         }
     }
 
@@ -252,7 +260,10 @@ public sealed class MainWindow : Window
             ImGui.TextDisabled("Only in special areas such as the Diadem or ocean fishing");
             using var indent = ImRaii.PushIndent();
             foreach (var need in route.Unlocated)
+            {
                 ImGui.TextUnformatted($"{need.Amount}x {need.Item.Name}");
+                LinkOnClick(need.Item);
+            }
         }
     }
 
@@ -290,17 +301,17 @@ public sealed class MainWindow : Window
                 .Distinct()
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            if (elsewhere.Count > 0 && ImGui.IsItemHovered())
-                ImGui.SetTooltip($"Also in: {string.Join(", ", elsewhere)}");
+            LinkOnClick(need.Item, elsewhere.Count > 0 ? $"Also in: {string.Join(", ", elsewhere)}" : null);
         }
     }
 
-    private static void DrawCrafts(MaterialPlan plan)
+    private void DrawCrafts(MaterialPlan plan)
     {
         ImGui.TextDisabled("In order, ingredients first");
         foreach (var step in plan.Crafts)
         {
             ImGui.TextUnformatted($"{step.Crafts}x {step.Result.Name}");
+            LinkOnClick(step.Result);
             ImGui.SameLine();
             var extra = step.Produced > step.Needed ? $", makes {step.Produced}, need {step.Needed}" : string.Empty;
             ImGui.TextDisabled($"({Job(step.Recipe)}{extra})");
@@ -319,7 +330,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    private static void DrawTreeNode(TreeNode node, int depth)
+    private void DrawTreeNode(TreeNode node, int depth)
     {
         using var id = ImRaii.PushId($"{depth}:{node.Item.ItemId}");
         var label = node.Recipe is { } recipe
@@ -329,15 +340,32 @@ public sealed class MainWindow : Window
         if (node.Children.Count == 0)
         {
             ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen | ImGuiTreeNodeFlags.Bullet);
+            LinkOnClick(node.Item);
             return;
         }
 
-        if (!ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.DefaultOpen))
+        // Only the arrow folds the node, so clicking the name can link it.
+        var open = ImGui.TreeNodeEx(label, ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.OpenOnArrow);
+        if (!ImGui.IsItemToggledOpen())
+            LinkOnClick(node.Item);
+        if (!open)
             return;
 
         foreach (var child in node.Children)
             DrawTreeNode(child, depth + 1);
         ImGui.TreePop();
+    }
+
+    private void LinkOnClick(ItemNode item, string? hint = null)
+    {
+        if (!ImGui.IsItemHovered())
+            return;
+
+        ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        ImGui.SetTooltip(hint is null ? "Click to link in chat" : $"{hint}\nClick to link in chat");
+
+        if (ImGui.IsItemClicked())
+            chatGui.Print(SeString.CreateItemLink(item.ItemId, false), "What Do I Need?");
     }
 
     private void Mark(uint recipeId)
